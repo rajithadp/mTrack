@@ -2,53 +2,43 @@
 
 nextflow.enable.dsl=2
 
-// Define input parameters (default to null, user should provide them via CLI)
-params.sample_id   = "sample_1"
-params.region      = "chr1:1000000-2000000" // Default region to plot
-params.sv_vcf      = null
-params.cnv_vcf     = null
-params.meth_bed    = null
-params.cov_bw      = null
-params.outdir      = "results"
+params.input_dir = "results" // Folder containing the pipeline outputs
+params.sample    = "sample_alias"
+params.region    = "chr11:67641087-71654474"
+params.outdir    = "plots"
 
-process VISUALIZE_TRACKS {
-    publishDir "${params.outdir}/plots", mode: 'copy'
-    
+process PLOT_VARIATION {
+    tag "${sample_id}"
+    publishDir "${params.outdir}", mode: 'copy'
+
     input:
-    val sample_id
+    tuple val(sample_id), path(sv), path(cnv), path(meth), path(cov)
     val region
-    path sv_vcf
-    path cnv_vcf
-    path meth_bed
-    path cov_bw
 
     output:
-    path "${sample_id}_tracks.pdf"
+    path "${sample_id}_visualization.pdf"
 
     script:
     """
-    # Run the R script located in the bin/ directory
     plot_gviz_tracks.R \\
         --sample ${sample_id} \\
-        --region ${region} \\
-        --sv ${sv_vcf} \\
-        --cnv ${cnv_vcf} \\
-        --meth ${meth_bed} \\
-        --cov ${cov_bw} \\
-        --out ${sample_id}_tracks.pdf
+        --region "${region}" \\
+        --sv_vcf ${sv} \\
+        --cnv_vcf ${cnv} \\
+        --meth_bw ${meth} \\
+        --cov_bg ${cov} \\
+        --out ${sample_id}_visualization.pdf
     """
 }
 
 workflow {
-    // Check if required inputs are provided
-    if (!params.sv_vcf || !params.cnv_vcf || !params.meth_bed || !params.cov_bw) {
-        error "Please provide all required input tracks (--sv_vcf, --cnv_vcf, --meth_bed, --cov_bw)"
-    }
+    // Collect the specific files based on the pipeline's naming convention
+    def sv_vcf  = file("${params.input_dir}/${params.sample}.wf_sv.vcf.gz")
+    def cnv_vcf = file("${params.input_dir}/${params.sample}.wf_cnv.vcf.gz")
+    def meth_bw = file("${params.input_dir}/${params.sample}.wf_mods.5mC.bw")
+    def cov_bg  = file("${params.input_dir}/${params.sample}.per-base.bedgraph.gz")
 
-    sv_ch   = file(params.sv_vcf)
-    cnv_ch  = file(params.cnv_vcf)
-    meth_ch = file(params.meth_bed)
-    cov_ch  = file(params.cov_bw)
+    data_ch = Channel.of([params.sample, sv_vcf, cnv_vcf, meth_bw, cov_bg])
 
-    VISUALIZE_TRACKS(params.sample_id, params.region, sv_ch, cnv_ch, meth_ch, cov_ch)
+    PLOT_VARIATION(data_ch, params.region)
 }

@@ -1,46 +1,57 @@
 #!/usr/bin/env Rscript
 
-library(optparse)
-library(Gviz)
-library(GenomicRanges)
-library(rtracklayer)
+suppressPackageStartupMessages({
+  library(optparse)
+  library(Gviz)
+  library(GenomicRanges)
+  library(VariantAnnotation)
+})
 
 option_list = list(
-  make_option(c("--sample"), type="character", default=NULL, help="Sample ID"),
-  make_option(c("--region"), type="character", default=NULL, help="Genomic region (e.g., chr1:1000-2000)"),
-  make_option(c("--sv"), type="character", default=NULL, help="Path to SV VCF"),
-  make_option(c("--cnv"), type="character", default=NULL, help="Path to CNV VCF/BED"),
-  make_option(c("--meth"), type="character", default=NULL, help="Path to Methylation BedGraph"),
-  make_option(c("--cov"), type="character", default=NULL, help="Path to Coverage BigWig"),
-  make_option(c("--out"), type="character", default="output.pdf", help="Output PDF file")
+  make_option(c("--sample"), type="character", help="Sample Alias"),
+  make_option(c("--region"), type="character", help="Region (chr:start-end)"),
+  make_option(c("--sv_vcf"), type="character", help="wf_sv.vcf.gz"),
+  make_option(c("--cnv_vcf"), type="character", help="wf_cnv.vcf.gz"),
+  make_option(c("--meth_bw"), type="character", help="wf_mods.5mC.bw"),
+  make_option(c("--cov_bg"), type="character", help="per-base.bedgraph.gz"),
+  make_option(c("--out"), type="character", help="Output PDF name")
 )
 opt = parse_args(OptionParser(option_list=option_list))
 
-# Parse Region
-chrom <- strsplit(opt$region, ":")[]
-coords <- strsplit(strsplit(opt$region, ":")[], "-")[]
-start_pos <- as.numeric(coords)
-end_pos <- as.numeric(coords)
+# Parse coordinates
+reg <- strsplit(opt$region, "[:-]")[]
+chrom <- reg; s <- as.numeric(reg); e <- as.numeric(reg)
+gen <- "hg38" # Standard for wf-human-variation
 
-# 1. Base Tracks
-itrack <- IdeogramTrack(genome = "hg38", chromosome = chrom)
-gtrack <- GenomeAxisTrack()
+# 1. Axis & Ideogram
+axTrack <- GenomeAxisTrack()
+idxTrack <- IdeogramTrack(genome = gen, chromosome = chrom)
 
-# 2. Coverage Track (BigWig)
-cov_track <- DataTrack(range = opt$cov, genome = "hg38", type = "l", 
-                       chromosome = chrom, name = "Coverage", fill.mountain = c("blue", "blue"))
+# 2. SV Track (Arrows)
+# We parse the VCF specifically for the requested region to keep it light
+sv_vcf <- readVcf(opt$sv_vcf, gen)
+sv_gr <- rowRanges(sv_vcf)
+svTrack <- AnnotationTrack(sv_gr, name = "SVs", chromosome = chrom, 
+                           shape = "arrow", fill = "red", col = "red")
 
-# 3. Methylation Track (BedGraph)
-meth_track <- DataTrack(range = opt$meth, genome = "hg38", type = "p", 
-                        chromosome = chrom, name = "Methylation %", col = "red")
+# 3. Coverage Track (Step-line from BedGraph)
+covTrack <- DataTrack(range = opt$cov_bg, genome = gen, chromosome = chrom,
+                      type = "s", name = "Coverage", fill = "gray", col = "black")
 
-# 4. SV / CNV Tracks (Assuming BED format for simplicity in this template)
-# Note: If these are raw VCFs, you will need to parse them with VariantAnnotation first.
-sv_track <- AnnotationTrack(range = opt$sv, genome = "hg38", name = "SVs", chromosome = chrom)
-cnv_track <- AnnotationTrack(range = opt$cnv, genome = "hg38", name = "CNVs", chromosome = chrom)
+# 4. Methylation Track (Histogram from BigWig)
+methTrack <- DataTrack(range = opt$meth_bw, genome = gen, chromosome = chrom,
+                       type = "h", name = "5mC %", col = "black", fill = "black")
 
-# Plot to PDF
-pdf(opt$out, width = 10, height = 8)
-plotTracks(list(itrack, gtrack, cov_track, meth_track, cnv_track, sv_track), 
-           from = start_pos, to = end_pos, main = paste("Multi-Omics:", opt$sample))
+# 5. CNV Track
+cnv_vcf <- readVcf(opt$cnv_vcf, gen)
+cnv_gr <- rowRanges(cnv_vcf)
+cnvTrack <- AnnotationTrack(cnv_gr, name = "CNVs", chromosome = chrom, 
+                            fill = "blue", col = "darkblue")
+
+# Plotting
+pdf(opt$out, width = 12, height = 10)
+plotTracks(list(idxTrack, axTrack, svTrack, covTrack, methTrack, cnvTrack),
+           from = s, to = e, chromosome = chrom,
+           background.title = "white", col.title = "black", 
+           cex.title = 0.8, justification.title = "left")
 dev.off()
